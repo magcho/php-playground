@@ -4,6 +4,9 @@ services:
   phbox:
     build: .
     container_name: phbox
+    # Default bridge has working outbound HTTPS on some Docker hosts
+    # where user-defined compose networks do not.
+    network_mode: bridge
     ports:
       - "${PHBOX_PORT:-8080}:8080"
     user: "0:0"
@@ -32,6 +35,7 @@ services:
 
   image-warmup:
     image: docker:27-cli
+    network_mode: bridge
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: ["/bin/sh", "-c"]

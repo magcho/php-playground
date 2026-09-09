@@ -3,11 +3,15 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import path from 'node:path';
 import fs from 'node:fs';
+import dns from 'node:dns';
 import { config } from './config.js';
 import { SessionStore } from './services/session.js';
 import { DockerRunner } from './services/docker-runner.js';
 import { createApiRouter } from './routes/api.js';
 import { apiLimiter } from './middleware/rate-limit.js';
+
+// Prefer IPv4 — some Docker networks fail connecting to Packagist over IPv6
+dns.setDefaultResultOrder('ipv4first');
 
 async function main() {
   const sessions = new SessionStore();

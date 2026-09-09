@@ -157,7 +157,7 @@ export function createApiRouter({ sessions, runner }) {
       const url = `https://packagist.org/search.json?q=${encodeURIComponent(q)}&per_page=8`;
       const response = await fetch(url, {
         headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(20000),
       });
       if (!response.ok) {
         return res.status(502).json({ error: 'packagist unavailable' });
