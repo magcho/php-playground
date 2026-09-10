@@ -3,9 +3,12 @@ import { Router } from 'express';
 import { config } from '../config.js';
 import { runCommand } from '../services/process.js';
 import { validatePackages } from '../services/session.js';
+import { Semaphore } from '../services/semaphore.js';
 
 const SESSION_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const runSemaphore = new Semaphore(config.maxConcurrentRuns, config.maxQueuedRuns);
 
 export function requireRunnerToken(req, res, next) {
   const header = req.get('authorization') || '';
@@ -38,6 +41,7 @@ export function createRunnerRouter({ dockerRunner }) {
         error: docker.ok ? null : docker.stderr || docker.stdout,
       },
       runtime,
+      capacity: runSemaphore.snapshot(),
     });
   });
 
@@ -66,6 +70,16 @@ export function createRunnerRouter({ dockerRunner }) {
       );
     } catch (err) {
       return res.status(400).json({ error: err.message });
+    }
+
+    let release;
+    try {
+      release = await runSemaphore.acquire();
+    } catch (err) {
+      if (err.code === 'RUNNER_BUSY') {
+        return res.status(503).json({ error: 'runner busy', capacity: runSemaphore.snapshot() });
+      }
+      throw err;
     }
 
     const sessionDir = path.join(config.dataDir, 'sessions', sessionId);
@@ -100,8 +114,13 @@ export function createRunnerRouter({ dockerRunner }) {
           : null,
       });
     } catch (err) {
+      if (err.code === 'DISK_QUOTA') {
+        return res.status(507).json({ error: err.message });
+      }
       console.error('[phbox-runner] run failed:', err);
       res.status(500).json({ error: err.message || 'run failed' });
+    } finally {
+      release();
     }
   });
 

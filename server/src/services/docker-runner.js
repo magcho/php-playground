@@ -5,9 +5,9 @@ import { config } from '../config.js';
 import { runCommand } from './process.js';
 
 function dockerBaseArgs(memory, network) {
+  // Intentionally omit --rm so we can always docker rm -f by name on timeout.
   return [
     'run',
-    '--rm',
     '--network',
     network,
     '--memory',
@@ -18,6 +18,8 @@ function dockerBaseArgs(memory, network) {
     '128',
     '--security-opt',
     'no-new-privileges',
+    '--cap-drop',
+    'ALL',
   ];
 }
 
@@ -93,9 +95,11 @@ export class DockerRunner {
     return path.join(config.hostDataDir, rel);
   }
 
-  buildComposerArgs(hostWorkDir) {
+  buildComposerArgs(hostWorkDir, containerName) {
     return [
       ...dockerBaseArgs(config.composerMemory, 'bridge'),
+      '--name',
+      containerName,
       '-v',
       `${hostWorkDir}:/app`,
       '-w',
@@ -114,10 +118,12 @@ export class DockerRunner {
       '--prefer-dist',
       '--no-progress',
       '--ignore-platform-reqs',
+      '--no-plugins',
+      '--no-scripts',
     ];
   }
 
-  buildPhpArgs(hostWorkDir, phpVersion) {
+  buildPhpArgs(hostWorkDir, phpVersion, containerName) {
     const image = config.phpVersions[phpVersion];
     if (!image) {
       throw new Error(`unsupported PHP version: ${phpVersion}`);
@@ -125,6 +131,8 @@ export class DockerRunner {
     const hostIni = process.env.HOST_PHP_INI_PATH || config.phpIniPath;
     return [
       ...dockerBaseArgs(config.memoryLimit, 'none'),
+      '--name',
+      containerName,
       '--runtime',
       this.phpRuntime,
       '-v',
@@ -139,6 +147,30 @@ export class DockerRunner {
       'display_errors=1',
       'run.php',
     ];
+  }
+
+  async forceRemoveContainer(containerName) {
+    if (!containerName) return;
+    await runCommand(this.dockerBin, ['rm', '-f', containerName], {
+      timeoutMs: 15_000,
+    });
+  }
+
+  /**
+   * Run a docker container by unique name and always remove it afterwards.
+   * On CLI timeout, force-removes the container so it cannot keep burning CPU.
+   */
+  async runNamedContainer(args, timeoutMs) {
+    const nameIdx = args.indexOf('--name');
+    const containerName = nameIdx >= 0 ? args[nameIdx + 1] : null;
+    try {
+      return await runCommand(this.dockerBin, args, {
+        timeoutMs,
+        onTimeout: () => this.forceRemoveContainer(containerName),
+      });
+    } finally {
+      await this.forceRemoveContainer(containerName);
+    }
   }
 
   async prepareWorkspace(sessionDir, session) {
@@ -160,6 +192,7 @@ export class DockerRunner {
       config: {
         'sort-packages': true,
         audit: { abandoned: 'ignore' },
+        'allow-plugins': false,
       },
     };
     await fs.writeFile(
@@ -197,43 +230,94 @@ require __DIR__ . '/index.php';
     }
 
     const hostWorkDir = this.hostPathFor(workDir);
-    const args = this.buildComposerArgs(hostWorkDir);
-    const result = await runCommand(this.dockerBin, args, {
-      timeoutMs: config.composerTimeoutMs,
-    });
+    const containerName = `phbox-composer-${randomUUID()}`;
+    const args = this.buildComposerArgs(hostWorkDir, containerName);
+    const result = await this.runNamedContainer(args, config.composerTimeoutMs);
     return { skipped: false, ...result };
   }
 
   async executePhp(workDir, phpVersion) {
     const hostWorkDir = this.hostPathFor(workDir);
-    const args = this.buildPhpArgs(hostWorkDir, phpVersion);
-    return runCommand(this.dockerBin, args, {
-      timeoutMs: config.runTimeoutMs,
-    });
+    const containerName = `phbox-php-${randomUUID()}`;
+    const args = this.buildPhpArgs(hostWorkDir, phpVersion, containerName);
+    return this.runNamedContainer(args, config.runTimeoutMs);
+  }
+
+  async removeWorkDir(workDir) {
+    if (!workDir) return;
+    try {
+      await fs.rm(workDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Approximate session disk usage under sessions/<id>.
+   */
+  async sessionDiskBytes(sessionDir) {
+    let total = 0;
+    async function walk(dir) {
+      let entries = [];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(full);
+        } else if (entry.isFile()) {
+          try {
+            const st = await fs.stat(full);
+            total += st.size;
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+    await walk(sessionDir);
+    return total;
   }
 
   async run(sessionDir, session) {
-    const workDir = await this.prepareWorkspace(sessionDir, session);
-    const composer = await this.composerInstall(workDir);
-    if (!composer.ok && !composer.skipped) {
-      return {
-        ok: false,
-        phase: 'composer',
-        phpVersion: session.phpVersion,
-        composer,
-        execution: null,
-        workDir,
-      };
+    const used = await this.sessionDiskBytes(sessionDir);
+    if (used > config.maxSessionDiskBytes) {
+      const err = new Error(
+        `session disk quota exceeded (${used} > ${config.maxSessionDiskBytes} bytes)`,
+      );
+      err.code = 'DISK_QUOTA';
+      throw err;
     }
 
-    const execution = await this.executePhp(workDir, session.phpVersion);
-    return {
-      ok: execution.ok,
-      phase: execution.ok ? 'done' : 'execution',
-      phpVersion: session.phpVersion,
-      composer,
-      execution,
-      workDir,
-    };
+    const workDir = await this.prepareWorkspace(sessionDir, session);
+    try {
+      const composer = await this.composerInstall(workDir);
+      if (!composer.ok && !composer.skipped) {
+        return {
+          ok: false,
+          phase: 'composer',
+          phpVersion: session.phpVersion,
+          composer,
+          execution: null,
+          workDir,
+        };
+      }
+
+      const execution = await this.executePhp(workDir, session.phpVersion);
+      return {
+        ok: execution.ok,
+        phase: execution.ok ? 'done' : 'execution',
+        phpVersion: session.phpVersion,
+        composer,
+        execution,
+        workDir,
+      };
+    } finally {
+      // Drop vendor/code artifacts immediately after the run to bound disk use.
+      await this.removeWorkDir(workDir);
+    }
   }
 }
