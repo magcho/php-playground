@@ -225,17 +225,17 @@ workspace のホストパス変換は現行 `hostPathFor()` と同じく `DATA_D
 
 ネットワーク:
 
-- 以前の「user-defined network で outbound HTTPS が壊れる」事象があるため、Packagist は **web 側**のまま維持する
-- web↔runner の内部通信が確実であること（サービス名 `runner` で到達）を優先。必要なら runner も `network_mode: bridge` + 固定的な到達手段ではなく、compose のデフォルト network で両サービスを同居させる（実機で HTTPS と内部 DNS の両方を確認する）
-
-実装時の制約: web の Packagist 検索が動くこと、かつ `RUNNER_URL=http://runner:8081` が名前解決できること。両立できない場合は設計を改訂する（例: runner を host ネットワークにしない、extra_hosts 等）。**初回実装では両サービスを同一 compose project network に置き、web の outbound を実測して決める。**
+- Packagist 検索は **web 側**のまま維持する（現行の outbound HTTPS 問題の再発を避ける）
+- `web` と `runner` は同一 compose project の **user-defined network** に置き、`RUNNER_URL=http://runner:8081` で名前解決する
+- 現行 `phbox` が `network_mode: bridge` なのは Compose ネットワークでの outbound 不具合回避だった。分割後は web の Packagist (`fetch`) が user-defined network で成功することをデプロイ検証の必須項目にする
+- もし web の outbound HTTPS が失敗する場合のみ、設計改訂チケットとする（例: web だけ `network_mode: bridge` にし、runner へは `extra_hosts` / 固定 IP で到達）。**初回実装ではフォールバックをコードに入れない**
 
 ### Dockerfile
 
-- マルチステージは維持
-- **web イメージ**: Node + 静的ファイル。`docker-ce-cli` を入れない
-- **runner イメージ**: Node + `docker-ce-cli`（現行本番イメージに近い）
-- 単一 Dockerfile の target 分割、または `Dockerfile.web` / `Dockerfile.runner` のいずれでもよい（実装計画で一方に固定）
+- 単一 `Dockerfile` の multi-target で分割する（ファイル増殖を避ける）
+- **target `web`**: Node + 静的ファイル。`docker-ce-cli` を入れない
+- **target `runner`**: Node + `docker-ce-cli`（現行本番イメージに近い）
+- compose は `build.target: web|runner` でそれぞれビルドする
 
 ### 環境変数（`.env.example` 追加）
 
