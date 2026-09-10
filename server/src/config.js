@@ -28,6 +28,10 @@ export const config = {
     '8.4': process.env.PHP_IMAGE_84 || 'php:8.4-cli',
   },
   composerImage: process.env.COMPOSER_IMAGE || 'composer:2',
+  /** PHP sandbox Docker runtime (gVisor). Never silently fall back to runc. */
+  phpRuntime: process.env.PHP_RUNTIME || 'runsc',
+  runnerUrl: process.env.RUNNER_URL || 'http://runner:8081',
+  runnerToken: process.env.RUNNER_TOKEN || '',
   defaultCode: `<?php
 
 declare(strict_types=1);

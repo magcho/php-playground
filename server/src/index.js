@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import dns from 'node:dns';
 import { config } from './config.js';
 import { SessionStore } from './services/session.js';
-import { DockerRunner } from './services/docker-runner.js';
+import { RunnerClient } from './services/runner-client.js';
 import { createApiRouter } from './routes/api.js';
 import { apiLimiter } from './middleware/rate-limit.js';
 
@@ -14,22 +14,15 @@ import { apiLimiter } from './middleware/rate-limit.js';
 dns.setDefaultResultOrder('ipv4first');
 
 async function main() {
+  if (!config.runnerToken) {
+    console.error('[phbox] RUNNER_TOKEN is required');
+    process.exit(1);
+  }
+
   const sessions = new SessionStore();
   await sessions.init();
 
-  const runner = new DockerRunner();
-
-  // Pull images in background so first run is faster
-  runner.ensureImages().then((results) => {
-    const failed = results.filter((r) => !r.ready);
-    if (failed.length) {
-      console.warn('[phbox] some images failed to pull:', failed);
-    } else {
-      console.log('[phbox] runner images ready:', results.map((r) => r.image).join(', '));
-    }
-  }).catch((err) => {
-    console.warn('[phbox] image ensure failed:', err.message);
-  });
+  const runner = new RunnerClient();
 
   setInterval(() => {
     sessions.cleanupExpired().then((n) => {

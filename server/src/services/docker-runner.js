@@ -24,6 +24,7 @@ function dockerBaseArgs(memory, network) {
 export class DockerRunner {
   constructor(options = {}) {
     this.dockerBin = options.dockerBin || process.env.DOCKER_BIN || 'docker';
+    this.phpRuntime = options.phpRuntime || config.phpRuntime;
   }
 
   async ensureImages() {
@@ -54,12 +55,90 @@ export class DockerRunner {
     return results;
   }
 
+  /**
+   * Probe whether the configured PHP runtime (gVisor runsc) is registered.
+   * Does not fall back to runc.
+   */
+  async checkPhpRuntime() {
+    const runtime = this.phpRuntime;
+    const info = await runCommand(this.dockerBin, ['info', '--format', '{{json .Runtimes}}'], {
+      timeoutMs: 10_000,
+    });
+    if (!info.ok) {
+      return {
+        php: runtime,
+        ok: false,
+        error: info.stderr || info.stdout || 'docker info failed',
+      };
+    }
+    let runtimes = {};
+    try {
+      runtimes = JSON.parse(info.stdout.trim() || '{}');
+    } catch {
+      return { php: runtime, ok: false, error: 'failed to parse docker runtimes' };
+    }
+    const ok = Object.prototype.hasOwnProperty.call(runtimes, runtime);
+    return {
+      php: runtime,
+      ok,
+      error: ok ? null : `docker runtime "${runtime}" is not registered`,
+    };
+  }
+
   hostPathFor(containerPath) {
     const rel = path.relative(config.dataDir, containerPath);
     if (rel.startsWith('..')) {
       throw new Error('workspace path escapes data dir');
     }
     return path.join(config.hostDataDir, rel);
+  }
+
+  buildComposerArgs(hostWorkDir) {
+    return [
+      ...dockerBaseArgs(config.composerMemory, 'bridge'),
+      '-v',
+      `${hostWorkDir}:/app`,
+      '-w',
+      '/app',
+      '-e',
+      'COMPOSER_HOME=/tmp/composer',
+      '-e',
+      'COMPOSER_CACHE_DIR=/tmp/composer-cache',
+      '-e',
+      'COMPOSER_ALLOW_SUPERUSER=1',
+      // composer:2 ENTRYPOINT is already "composer"
+      config.composerImage,
+      'install',
+      '--no-interaction',
+      '--no-ansi',
+      '--prefer-dist',
+      '--no-progress',
+      '--ignore-platform-reqs',
+    ];
+  }
+
+  buildPhpArgs(hostWorkDir, phpVersion) {
+    const image = config.phpVersions[phpVersion];
+    if (!image) {
+      throw new Error(`unsupported PHP version: ${phpVersion}`);
+    }
+    const hostIni = process.env.HOST_PHP_INI_PATH || config.phpIniPath;
+    return [
+      ...dockerBaseArgs(config.memoryLimit, 'none'),
+      '--runtime',
+      this.phpRuntime,
+      '-v',
+      `${hostWorkDir}:/workspace:ro`,
+      '-v',
+      `${hostIni}:/usr/local/etc/php/conf.d/zz-sandbox.ini:ro`,
+      '-w',
+      '/workspace',
+      image,
+      'php',
+      '-d',
+      'display_errors=1',
+      'run.php',
+    ];
   }
 
   async prepareWorkspace(sessionDir, session) {
@@ -80,7 +159,7 @@ export class DockerRunner {
       require: session.packages || {},
       config: {
         'sort-packages': true,
-        'audit': { abandoned: 'ignore' },
+        audit: { abandoned: 'ignore' },
       },
     };
     await fs.writeFile(
@@ -88,7 +167,6 @@ export class DockerRunner {
       JSON.stringify(composerJson, null, 2),
     );
 
-    // bootstrap that loads vendor if present
     const bootstrap = `<?php
 declare(strict_types=1);
 $autoload = __DIR__ . '/vendor/autoload.php';
@@ -119,28 +197,7 @@ require __DIR__ . '/index.php';
     }
 
     const hostWorkDir = this.hostPathFor(workDir);
-    const args = [
-      ...dockerBaseArgs(config.composerMemory, 'bridge'),
-      '-v',
-      `${hostWorkDir}:/app`,
-      '-w',
-      '/app',
-      '-e',
-      'COMPOSER_HOME=/tmp/composer',
-      '-e',
-      'COMPOSER_CACHE_DIR=/tmp/composer-cache',
-      '-e',
-      'COMPOSER_ALLOW_SUPERUSER=1',
-      // composer:2 ENTRYPOINT is already "composer"
-      config.composerImage,
-      'install',
-      '--no-interaction',
-      '--no-ansi',
-      '--prefer-dist',
-      '--no-progress',
-      '--ignore-platform-reqs',
-    ];
-
+    const args = this.buildComposerArgs(hostWorkDir);
     const result = await runCommand(this.dockerBin, args, {
       timeoutMs: config.composerTimeoutMs,
     });
@@ -148,28 +205,8 @@ require __DIR__ . '/index.php';
   }
 
   async executePhp(workDir, phpVersion) {
-    const image = config.phpVersions[phpVersion];
-    if (!image) {
-      throw new Error(`unsupported PHP version: ${phpVersion}`);
-    }
-
     const hostWorkDir = this.hostPathFor(workDir);
-    const hostIni = process.env.HOST_PHP_INI_PATH || config.phpIniPath;
-    const args = [
-      ...dockerBaseArgs(config.memoryLimit, 'none'),
-      '-v',
-      `${hostWorkDir}:/workspace:ro`,
-      '-v',
-      `${hostIni}:/usr/local/etc/php/conf.d/zz-sandbox.ini:ro`,
-      '-w',
-      '/workspace',
-      image,
-      'php',
-      '-d',
-      'display_errors=1',
-      'run.php',
-    ];
-
+    const args = this.buildPhpArgs(hostWorkDir, phpVersion);
     return runCommand(this.dockerBin, args, {
       timeoutMs: config.runTimeoutMs,
     });
