@@ -25,10 +25,20 @@ export class RunnerClient {
         headers: this.headers(),
         signal: AbortSignal.timeout(5_000),
       });
-      if (!res.ok) {
-        return { ok: false, status: res.status, error: 'runner health failed' };
+      let body = {};
+      try {
+        body = await res.json();
+      } catch {
+        /* ignore non-JSON */
       }
-      const body = await res.json();
+      if (!res.ok) {
+        return {
+          ...body,
+          ok: false,
+          status: res.status,
+          error: body.error || body.runtime?.error || 'runner health failed',
+        };
+      }
       return { ok: Boolean(body.ok), ...body };
     } catch (err) {
       return { ok: false, error: err.message || 'runner unavailable' };

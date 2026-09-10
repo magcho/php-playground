@@ -13,12 +13,16 @@ if [[ ! -f "$ROOT/.env" ]]; then
   cp "$ROOT/.env.example" "$ROOT/.env"
   sed -i "s|^PHBOX_DATA=.*|PHBOX_DATA=$DATA_DIR|" "$ROOT/.env"
   sed -i "s|^PHBOX_INI=.*|PHBOX_INI=$INI_PATH|" "$ROOT/.env"
-  # Generate a token if still placeholder
-  if grep -q 'change-me-to-a-long-random-string' "$ROOT/.env"; then
-    TOKEN="$(openssl rand -hex 24)"
-    sed -i "s|^RUNNER_TOKEN=.*|RUNNER_TOKEN=$TOKEN|" "$ROOT/.env"
-    echo "[phbox] generated RUNNER_TOKEN"
-  fi
+  TOKEN="$(openssl rand -hex 24)"
+  sed -i "s|^RUNNER_TOKEN=.*|RUNNER_TOKEN=$TOKEN|" "$ROOT/.env"
+  echo "[phbox] generated RUNNER_TOKEN"
+fi
+
+# Refuse to start with a known placeholder token
+if grep -Eq '^RUNNER_TOKEN=(change-me-to-a-long-random-string|change-me|changeme|secret|password)?$' "$ROOT/.env"; then
+  echo "[phbox] ERROR: RUNNER_TOKEN in .env is missing or still a placeholder"
+  echo "[phbox] Set a long random value, e.g.: openssl rand -hex 24"
+  exit 1
 fi
 
 echo "[phbox] checking gVisor (runsc) Docker runtime"
@@ -33,16 +37,24 @@ Install gVisor on this Proxmox guest (nested virt NOT required), then register i
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" | sudo tee /etc/apt/sources.list.d/gvisor.list
   sudo apt-get update && sudo apt-get install -y runsc
 
-  # Register with Docker (merge into /etc/docker/daemon.json if you already have one):
-  sudo tee /etc/docker/daemon.json >/dev/null <<'JSON'
-  {
-    "runtimes": {
-      "runsc": {
-        "path": "/usr/bin/runsc"
-      }
+  # Merge runsc into existing Docker daemon config (do NOT blindly overwrite):
+  # 1) Edit /etc/docker/daemon.json and add under "runtimes":
+  #      "runsc": { "path": "/usr/bin/runsc" }
+  # 2) Or if the file does not exist yet:
+  sudo mkdir -p /etc/docker
+  if [[ ! -f /etc/docker/daemon.json ]]; then
+    sudo tee /etc/docker/daemon.json >/dev/null <<'JSON'
+{
+  "runtimes": {
+    "runsc": {
+      "path": "/usr/bin/runsc"
     }
   }
-  JSON
+}
+JSON
+  else
+    echo "  /etc/docker/daemon.json already exists — merge the runsc runtime manually, then:"
+  fi
   sudo systemctl restart docker
 
   # Verify:

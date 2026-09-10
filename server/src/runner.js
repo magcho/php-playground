@@ -2,10 +2,12 @@ import express from 'express';
 import { config } from './config.js';
 import { DockerRunner } from './services/docker-runner.js';
 import { createRunnerRouter } from './routes/runner-api.js';
+import { runnerTokenError } from './lib/token.js';
 
 async function main() {
-  if (!config.runnerToken) {
-    console.error('[phbox-runner] RUNNER_TOKEN is required');
+  const tokenErr = runnerTokenError(config.runnerToken);
+  if (tokenErr) {
+    console.error(`[phbox-runner] ${tokenErr}`);
     process.exit(1);
   }
 

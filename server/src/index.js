@@ -9,13 +9,15 @@ import { SessionStore } from './services/session.js';
 import { RunnerClient } from './services/runner-client.js';
 import { createApiRouter } from './routes/api.js';
 import { apiLimiter } from './middleware/rate-limit.js';
+import { runnerTokenError } from './lib/token.js';
 
 // Prefer IPv4 — some Docker networks fail connecting to Packagist over IPv6
 dns.setDefaultResultOrder('ipv4first');
 
 async function main() {
-  if (!config.runnerToken) {
-    console.error('[phbox] RUNNER_TOKEN is required');
+  const tokenErr = runnerTokenError(config.runnerToken);
+  if (tokenErr) {
+    console.error(`[phbox] ${tokenErr}`);
     process.exit(1);
   }
 

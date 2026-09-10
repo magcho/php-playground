@@ -25,15 +25,18 @@ export function createApiRouter({ sessions, runner }) {
 
   router.get('/health', async (_req, res) => {
     const runnerHealth = await runner.health();
+    const runtimeOk = runnerHealth.runtime?.ok ?? false;
     res.status(runnerHealth.ok ? 200 : 503).json({
       ok: runnerHealth.ok,
       service: 'phbox',
       versions: Object.keys(config.phpVersions),
       runner: {
-        ok: runnerHealth.ok,
+        ok: Boolean(runnerHealth.docker?.ok ?? runnerHealth.ok),
         phpRuntime: runnerHealth.runtime?.php || config.phpRuntime,
-        runtimeOk: runnerHealth.runtime?.ok ?? false,
-        error: runnerHealth.ok ? null : runnerHealth.error || null,
+        runtimeOk,
+        error: runnerHealth.ok
+          ? null
+          : runnerHealth.runtime?.error || runnerHealth.docker?.error || runnerHealth.error || null,
       },
     });
   });

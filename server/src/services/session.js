@@ -98,24 +98,7 @@ export class SessionStore {
    * @param {Record<string, string>} packages
    */
   async setPackages(id, packages) {
-    if (!packages || typeof packages !== 'object' || Array.isArray(packages)) {
-      throw new Error('packages must be an object of name -> version');
-    }
-    const entries = Object.entries(packages);
-    if (entries.length > config.maxPackages) {
-      throw new Error(`at most ${config.maxPackages} packages allowed`);
-    }
-    const normalized = {};
-    for (const [name, version] of entries) {
-      if (!PACKAGE_NAME_RE.test(name)) {
-        throw new Error(`invalid package name: ${name}`);
-      }
-      const ver = String(version || '*').trim() || '*';
-      if (!VERSION_CONSTRAINT_RE.test(ver)) {
-        throw new Error(`invalid version constraint for ${name}`);
-      }
-      normalized[name] = ver;
-    }
+    const normalized = validatePackages(packages);
     const meta = JSON.parse(await fs.readFile(this.metaPath(id), 'utf8'));
     meta.packages = normalized;
     meta.updatedAt = new Date().toISOString();
@@ -158,15 +141,31 @@ export class SessionStore {
   }
 }
 
+/**
+ * Normalize and validate Composer package map. Throws on invalid input.
+ * @param {Record<string, string>} packages
+ * @returns {Record<string, string>}
+ */
 export function validatePackages(packages) {
-  const store = new SessionStore();
-  // reuse validation via a throw-style helper
-  const fake = async () => {
-    // not used — validation is inline above
-  };
-  void fake;
-  void store;
-  return packages;
+  if (!packages || typeof packages !== 'object' || Array.isArray(packages)) {
+    throw new Error('packages must be an object of name -> version');
+  }
+  const entries = Object.entries(packages);
+  if (entries.length > config.maxPackages) {
+    throw new Error(`at most ${config.maxPackages} packages allowed`);
+  }
+  const normalized = {};
+  for (const [name, version] of entries) {
+    if (!PACKAGE_NAME_RE.test(name)) {
+      throw new Error(`invalid package name: ${name}`);
+    }
+    const ver = String(version || '*').trim() || '*';
+    if (!VERSION_CONSTRAINT_RE.test(ver)) {
+      throw new Error(`invalid version constraint for ${name}`);
+    }
+    normalized[name] = ver;
+  }
+  return normalized;
 }
 
 export { PACKAGE_NAME_RE, VERSION_CONSTRAINT_RE };

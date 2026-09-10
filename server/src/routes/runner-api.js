@@ -2,6 +2,7 @@ import path from 'node:path';
 import { Router } from 'express';
 import { config } from '../config.js';
 import { runCommand } from '../services/process.js';
+import { validatePackages } from '../services/session.js';
 
 const SESSION_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -56,12 +57,15 @@ export function createRunnerRouter({ dockerRunner }) {
       return res.status(400).json({ error: `code exceeds ${config.maxCodeBytes} bytes` });
     }
 
-    const packages =
-      req.body?.packages && typeof req.body.packages === 'object' && !Array.isArray(req.body.packages)
-        ? req.body.packages
-        : {};
-    if (Object.keys(packages).length > config.maxPackages) {
-      return res.status(400).json({ error: `too many packages (max ${config.maxPackages})` });
+    let packages = {};
+    try {
+      packages = validatePackages(
+        req.body?.packages && typeof req.body.packages === 'object' && !Array.isArray(req.body.packages)
+          ? req.body.packages
+          : {},
+      );
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
     }
 
     const sessionDir = path.join(config.dataDir, 'sessions', sessionId);

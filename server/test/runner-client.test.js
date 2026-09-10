@@ -69,3 +69,26 @@ test('RunnerClient.run throws RUNNER_UNAVAILABLE on 401', async () => {
     (err) => err.code === 'RUNNER_UNAVAILABLE',
   );
 });
+
+test('RunnerClient.health preserves runtime error from 503 body', async () => {
+  const client = new RunnerClient({
+    baseUrl: 'http://runner.test',
+    token: 'tok',
+    fetchFn: async () => ({
+      ok: false,
+      status: 503,
+      async json() {
+        return {
+          ok: false,
+          docker: { ok: true, version: '27.0.0' },
+          runtime: { php: 'runsc', ok: false, error: 'docker runtime "runsc" is not registered' },
+        };
+      },
+    }),
+  });
+
+  const health = await client.health();
+  assert.equal(health.ok, false);
+  assert.equal(health.runtime.ok, false);
+  assert.match(health.error, /runsc/);
+});
