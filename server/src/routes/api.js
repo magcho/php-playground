@@ -204,5 +204,34 @@ export function createApiRouter({ sessions, runner }) {
     }
   });
 
+  router.get('/packagist/versions', async (req, res) => {
+    const pkg = String(req.query.package || '').trim().toLowerCase();
+    if (!pkg || !/^[a-z0-9]([_.-]?[a-z0-9]+)*\/[a-z0-9]([_.-]?[a-z0-9]+)*$/.test(pkg)) {
+      return res.status(400).json({ error: 'invalid package name' });
+    }
+    try {
+      const url = `https://repo.packagist.org/p2/${pkg}.json`;
+      const response = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (response.status === 404) {
+        return res.status(404).json({ error: 'package not found', versions: [] });
+      }
+      if (!response.ok) {
+        return res.status(502).json({ error: 'failed to fetch package metadata' });
+      }
+      const data = await response.json();
+      const packageEntries = data.packages?.[pkg] || [];
+      const versions = packageEntries
+        .map((entry) => entry.version)
+        .filter((v) => typeof v === 'string' && !v.startsWith('dev-') && !v.endsWith('-dev'));
+
+      res.json({ package: pkg, versions: versions.slice(0, 50) });
+    } catch (err) {
+      res.status(502).json({ error: err.message || 'failed to fetch package versions' });
+    }
+  });
+
   return router;
 }
