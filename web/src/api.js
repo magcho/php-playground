@@ -24,4 +24,6 @@ export const api = {
     }),
   searchPackages: (q) =>
     request(`/api/packagist/search?q=${encodeURIComponent(q)}`),
+  getPackageVersions: (pkg) =>
+    request(`/api/packagist/versions?package=${encodeURIComponent(pkg)}`),
 };
