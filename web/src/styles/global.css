@@ -262,13 +262,9 @@ button {
 
 .package-form {
   display: grid;
-  grid-template-columns: 1.2fr 1fr auto;
+  grid-template-columns: 1fr auto;
   gap: 0.5rem;
   align-items: stretch;
-}
-
-.package-form.single-field {
-  grid-template-columns: 1fr auto;
 }
 
 .package-step-confirmed {

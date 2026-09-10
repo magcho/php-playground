@@ -178,7 +178,7 @@ export function createApiRouter({ sessions, runner }) {
 
   router.get('/packagist/versions', async (req, res) => {
     const pkg = String(req.query.package || '').trim().toLowerCase();
-    if (!pkg || !pkg.includes('/')) {
+    if (!pkg || !/^[a-z0-9]([_.-]?[a-z0-9]+)*\/[a-z0-9]([_.-]?[a-z0-9]+)*$/.test(pkg)) {
       return res.status(400).json({ error: 'invalid package name' });
     }
     try {

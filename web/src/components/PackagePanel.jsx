@@ -31,7 +31,9 @@ export default function PackagePanel({ packages, onChange }) {
       setSearching(true);
       try {
         const data = await api.searchPackages(q);
-        setResults(data.results || []);
+        if (!confirmedPackage) {
+          setResults(data.results || []);
+        }
       } catch {
         setResults([]);
       } finally {
@@ -53,6 +55,9 @@ export default function PackagePanel({ packages, onChange }) {
     let active = true;
     setLoadingVersions(true);
     setVersionNotFound(false);
+    setResults([]);
+    setSearching(false);
+    setVersion('');
 
     api.getPackageVersions(confirmedPackage)
       .then((data) => {
@@ -60,17 +65,16 @@ export default function PackagePanel({ packages, onChange }) {
         const vers = data.versions || [];
         setAvailableVersions(vers);
         setVersionNotFound(vers.length === 0);
-        if (vers.length > 0 && !version) {
-          setVersion(`^${vers[0]}`);
-        } else if (!version) {
-          setVersion('*');
-        }
+        setVersion((prev) => {
+          if (prev) return prev;
+          return vers.length > 0 ? `^${vers[0]}` : '*';
+        });
       })
       .catch(() => {
         if (!active) return;
         setAvailableVersions([]);
         setVersionNotFound(true);
-        if (!version) setVersion('*');
+        setVersion((prev) => prev || '*');
       })
       .finally(() => {
         if (active) setLoadingVersions(false);
@@ -132,7 +136,7 @@ export default function PackagePanel({ packages, onChange }) {
       </div>
       <div className="packages">
         {!confirmedPackage ? (
-          <div className="package-form single-field">
+          <div className="package-form">
             <input
               placeholder="vendor/package を入力または検索"
               value={name}
