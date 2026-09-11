@@ -24,10 +24,20 @@ export function createApiRouter({ sessions, runner }) {
   }
 
   router.get('/health', async (_req, res) => {
-    res.json({
-      ok: true,
+    const runnerHealth = await runner.health();
+    const runtimeOk = runnerHealth.runtime?.ok ?? false;
+    res.status(runnerHealth.ok ? 200 : 503).json({
+      ok: runnerHealth.ok,
       service: 'phbox',
       versions: Object.keys(config.phpVersions),
+      runner: {
+        ok: Boolean(runnerHealth.docker?.ok ?? runnerHealth.ok),
+        phpRuntime: runnerHealth.runtime?.php || config.phpRuntime,
+        runtimeOk,
+        error: runnerHealth.ok
+          ? null
+          : runnerHealth.runtime?.error || runnerHealth.docker?.error || runnerHealth.error || null,
+      },
     });
   });
 
@@ -116,7 +126,25 @@ export function createApiRouter({ sessions, runner }) {
     }
 
     const session = await sessions.get(id);
-    const result = await runner.run(sessions.sessionDir(id), session);
+
+    let result;
+    try {
+      result = await runner.run({
+        sessionId: id,
+        phpVersion: session.phpVersion,
+        code: session.code,
+        packages: session.packages,
+      });
+    } catch (err) {
+      if (err.code === 'RUNNER_UNAVAILABLE') {
+        return res.status(502).json({ error: 'runner unavailable' });
+      }
+      if (err.code === 'RUNNER_BAD_REQUEST') {
+        return res.status(400).json({ error: err.message });
+      }
+      throw err;
+    }
+
     await sessions.markRun(id);
 
     res.json({

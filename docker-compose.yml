@@ -1,27 +1,50 @@
 # PHBOX_DATA must be an absolute host path so spawned runner containers
 # can mount the same files via the host Docker daemon.
 services:
-  phbox:
-    build: .
-    container_name: phbox
-    # Default bridge has working outbound HTTPS on some Docker hosts
-    # where user-defined compose networks do not.
-    network_mode: bridge
+  web:
+    build:
+      context: .
+      target: web
     ports:
       - "${PHBOX_PORT:-8080}:8080"
-    user: "0:0"
     environment:
       PORT: "8080"
       DATA_DIR: /data
-      HOST_DATA_DIR: ${PHBOX_DATA:-/var/lib/phbox/data}
       STATIC_DIR: /app/web/dist
+      RUNNER_URL: http://runner:8081
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?set RUNNER_TOKEN in .env}
+      RUN_TIMEOUT_MS: "15000"
+      COMPOSER_TIMEOUT_MS: "120000"
+    volumes:
+      - ${PHBOX_DATA:-/var/lib/phbox/data}:/data
+    depends_on:
+      - runner
+    restart: unless-stopped
+
+  runner:
+    build:
+      context: .
+      target: runner
+    # Not published — only reachable on the compose network
+    expose:
+      - "8081"
+    user: "0:0"
+    environment:
+      PORT: "8081"
+      DATA_DIR: /data
+      HOST_DATA_DIR: ${PHBOX_DATA:-/var/lib/phbox/data}
       PHP_INI_PATH: /app/runners/php.ini
       HOST_PHP_INI_PATH: ${PHBOX_INI:-/var/lib/phbox/php.ini}
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?set RUNNER_TOKEN in .env}
+      PHP_RUNTIME: runsc
       RUN_TIMEOUT_MS: "15000"
       COMPOSER_TIMEOUT_MS: "120000"
       RUNNER_MEMORY: "256m"
       COMPOSER_MEMORY: "512m"
       RUNNER_CPUS: "0.5"
+      MAX_CONCURRENT_RUNS: "${MAX_CONCURRENT_RUNS:-4}"
+      MAX_QUEUED_RUNS: "${MAX_QUEUED_RUNS:-16}"
+      MAX_SESSION_DISK_BYTES: "${MAX_SESSION_DISK_BYTES:-209715200}"
       PHP_IMAGE_81: php:8.1-cli
       PHP_IMAGE_82: php:8.2-cli
       PHP_IMAGE_83: php:8.3-cli
@@ -35,7 +58,6 @@ services:
 
   image-warmup:
     image: docker:27-cli
-    network_mode: bridge
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: ["/bin/sh", "-c"]
@@ -46,5 +68,6 @@ services:
         docker pull php:8.3-cli
         docker pull php:8.4-cli
         docker pull composer:2
+        docker pull alpine:3.20
     restart: "no"
     profiles: ["warmup"]

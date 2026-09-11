@@ -4,7 +4,11 @@ import { spawn } from 'node:child_process';
  * Run a command and capture stdout/stderr with timeout.
  * @param {string} command
  * @param {string[]} args
- * @param {{ timeoutMs?: number, env?: NodeJS.ProcessEnv }} options
+ * @param {{
+ *   timeoutMs?: number,
+ *   env?: NodeJS.ProcessEnv,
+ *   onTimeout?: () => void | Promise<void>,
+ * }} options
  */
 export function runCommand(command, args, options = {}) {
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -31,6 +35,11 @@ export function runCommand(command, args, options = {}) {
     const timer = setTimeout(() => {
       killed = true;
       child.kill('SIGKILL');
+      if (typeof options.onTimeout === 'function') {
+        Promise.resolve()
+          .then(() => options.onTimeout())
+          .catch(() => {});
+      }
     }, timeoutMs);
 
     child.stdout.on('data', (chunk) => {

@@ -28,6 +28,15 @@ export const config = {
     '8.4': process.env.PHP_IMAGE_84 || 'php:8.4-cli',
   },
   composerImage: process.env.COMPOSER_IMAGE || 'composer:2',
+  /** PHP sandbox Docker runtime (gVisor). Never silently fall back to runc. */
+  phpRuntime: process.env.PHP_RUNTIME || 'runsc',
+  runnerUrl: process.env.RUNNER_URL || 'http://runner:8081',
+  runnerToken: process.env.RUNNER_TOKEN || '',
+  /** Global in-process concurrency for PHP/Composer runs on the runner. */
+  maxConcurrentRuns: Number(process.env.MAX_CONCURRENT_RUNS || 4),
+  maxQueuedRuns: Number(process.env.MAX_QUEUED_RUNS || 16),
+  /** Soft disk budget per session directory (bytes). */
+  maxSessionDiskBytes: Number(process.env.MAX_SESSION_DISK_BYTES || 200 * 1024 * 1024),
   defaultCode: `<?php
 
 declare(strict_types=1);

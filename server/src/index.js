@@ -6,30 +6,25 @@ import fs from 'node:fs';
 import dns from 'node:dns';
 import { config } from './config.js';
 import { SessionStore } from './services/session.js';
-import { DockerRunner } from './services/docker-runner.js';
+import { RunnerClient } from './services/runner-client.js';
 import { createApiRouter } from './routes/api.js';
 import { apiLimiter } from './middleware/rate-limit.js';
+import { runnerTokenError } from './lib/token.js';
 
 // Prefer IPv4 — some Docker networks fail connecting to Packagist over IPv6
 dns.setDefaultResultOrder('ipv4first');
 
 async function main() {
+  const tokenErr = runnerTokenError(config.runnerToken);
+  if (tokenErr) {
+    console.error(`[phbox] ${tokenErr}`);
+    process.exit(1);
+  }
+
   const sessions = new SessionStore();
   await sessions.init();
 
-  const runner = new DockerRunner();
-
-  // Pull images in background so first run is faster
-  runner.ensureImages().then((results) => {
-    const failed = results.filter((r) => !r.ready);
-    if (failed.length) {
-      console.warn('[phbox] some images failed to pull:', failed);
-    } else {
-      console.log('[phbox] runner images ready:', results.map((r) => r.image).join(', '));
-    }
-  }).catch((err) => {
-    console.warn('[phbox] image ensure failed:', err.message);
-  });
+  const runner = new RunnerClient();
 
   setInterval(() => {
     sessions.cleanupExpired().then((n) => {
