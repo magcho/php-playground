@@ -91,12 +91,13 @@ stop_legacy() {
 health_check() {
   local port="${PHBOX_PORT:-8080}"
   local url="http://127.0.0.1:${port}/api/health"
+  local response
   log "waiting for health at $url"
   for _ in $(seq 1 30); do
-    if curl -fsS "$url" >/tmp/phbox-health.json 2>/dev/null; then
-      if grep -q '"ok":true' /tmp/phbox-health.json; then
+    if response="$(curl -fsS "$url" 2>/dev/null)"; then
+      if grep -q '"ok":true' <<<"$response"; then
         log "health check passed"
-        cat /tmp/phbox-health.json
+        printf '%s\n' "$response"
         return 0
       fi
     fi
