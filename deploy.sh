@@ -148,4 +148,6 @@ main() {
   log "note: web has no docker.sock; PHP runs under gVisor (runsc)"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
