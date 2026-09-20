@@ -57,7 +57,7 @@ services:
     restart: unless-stopped
 
   image-warmup:
-    image: docker:27-cli
+    image: docker:29-cli
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: ["/bin/sh", "-c"]
